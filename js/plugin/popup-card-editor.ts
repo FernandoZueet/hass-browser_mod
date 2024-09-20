@@ -4,6 +4,11 @@ import { loadHaForm } from "../helpers";
 
 const configSchema = [
   {
+    name: "id",
+    label: "ID",
+    selector: { text: {} },
+  },
+  {
     name: "entity",
     label: "Entity",
     selector: { entity: {} },

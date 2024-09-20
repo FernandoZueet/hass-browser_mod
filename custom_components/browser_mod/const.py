@@ -22,6 +22,7 @@ BROWSER_MOD_SERVICES = [
     "sequence",
     "delay",
     "popup",
+    "popup_card",
     "more_info",
     "close_popup",
     "notification",

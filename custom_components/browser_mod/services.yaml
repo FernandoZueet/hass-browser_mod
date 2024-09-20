@@ -35,6 +35,17 @@ delay:
         number:
           mode: box
 
+popup_card:
+  name: popup_card 
+  description: "Display a popup card by id" 
+  fields:
+    id:
+      name: ID popup card
+      description: ""
+      required: true
+      selector:
+        text:
+
 popup:
   name: popup
   description: "Display a popup"

@@ -281,6 +281,9 @@ class BrowserModPopup extends LitElement {
         <style>
           :host {
             ${this._style}
+            .content:focus-visible {
+              outline: -webkit-focus-ring-color auto 0px !important;
+            }
           }
         </style>
       </ha-dialog>
