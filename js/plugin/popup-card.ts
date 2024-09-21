@@ -1,6 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { property, state } from "lit/decorators.js";
-import { getLovelaceRoot } from "../helpers";
+import { PopupCardManager } from "./popupCardManager";
 
 import "./popup-card-editor";
 
@@ -191,74 +191,16 @@ class PopupCard extends LitElement {
   }
 }
 
-function observeNode(observer: MutationObserver, targetNode: Node | null, config: MutationObserverInit) {
-  if (targetNode instanceof Node) {
-    observer.observe(targetNode, config);
-  } else {
-    console.error('Failed to observe: target is not a valid Node', targetNode);
-  }
-}
+function setupPopupEventListener(lovelaceRoot: HTMLElement | null) {
+  if (!lovelaceRoot) return;
 
-function findPopupCardConfig(lovelaceRoot, id) {
-  const lovelaceConfig = lovelaceRoot?.lovelace?.config;
-  if (lovelaceConfig) {
-    for (const view of lovelaceConfig.views) {
-      if (view.cards) {
-        for (const card of view.cards) {
-          if (card.type === "custom:popup-card" && 
-              (card.id === id)) {
-            return card;
-          }
-        }
-      }
-      if (view.sections) {
-        for (const section of view.sections) {
-          if (section.cards) {
-            for (const card of section.cards) {
-              if (card.type === "custom:popup-card" && 
-                  (card.id === id)) {
-                return card;
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  return null;
-}
-
-(async () => {
-  while (!window.browser_mod) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-  await window.browser_mod.connectionPromise;
-
-  if (!customElements.get("popup-card"))
-    customElements.define("popup-card", PopupCard);
-
-  let lovelaceRoot = null;
-  for (;;) {
-    lovelaceRoot = await getLovelaceRoot(document);
-    if (lovelaceRoot) break;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  if (lovelaceRoot instanceof Node) {
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        console.log(mutation);
-      });
-    });
-
-    observeNode(observer, lovelaceRoot, { childList: true, subtree: true });
-  } else {
-    console.error('lovelaceRoot is not a valid Node:', lovelaceRoot);
-  }
+  const popupManager = new PopupCardManager(lovelaceRoot);
 
   window.addEventListener("call-popup", (ev: CustomEvent) => {
-    if (!ev.detail?.id) return;
-    const cardConfig = findPopupCardConfig(lovelaceRoot, ev.detail?.id);
+    const popupId = ev.detail?.id;
+    if (!popupId) return;
+
+    const cardConfig = popupManager.findPopupCardConfig(popupId);
     if (cardConfig) {
       ev.stopPropagation();
       ev.preventDefault();
@@ -270,7 +212,21 @@ function findPopupCardConfig(lovelaceRoot, id) {
         content: cardConfig.card,
         ...properties,
       });
+
     }
   });
+}
+
+(async () => {
+  while (!window.browser_mod) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  await window.browser_mod.connectionPromise;
+
+  if (!customElements.get("popup-card"))
+    customElements.define("popup-card", PopupCard);
+
+  const lovelaceRoot = await PopupCardManager.getLovelaceRoot();
+  if (lovelaceRoot) setupPopupEventListener(lovelaceRoot);
 
 })();
