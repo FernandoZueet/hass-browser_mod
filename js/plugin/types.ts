@@ -1,7 +1,6 @@
 const a = {};
 
 import { BrowserMod } from "./main";
-
 interface FullyKiosk {
   // Types from https://www.fully-kiosk.com/de/#websiteintegration
 
@@ -257,4 +256,12 @@ declare global {
     customCards?: [{}?];
     loadCardHelpers?: { () };
   }
+}
+
+export type icon = {
+  icon: string,
+  title: string,
+  action: any,
+  close: boolean,
+  class: string,
 }

@@ -1,15 +1,20 @@
 import { LitElement, html, css } from "lit";
-import { customElement, property, query } from "lit/decorators.js";
+import { property, query } from "lit/decorators.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { repeat } from "lit/directives/repeat.js";
 import {
   provideHass,
   loadLoadCardHelpers,
   hass_base_el,
   selectTree,
+  getMoreInfoDialog,
+  getMoreInfoDialogHADialog
 } from "../helpers";
 import { loadHaForm } from "../helpers";
+import { ObjectSelectorMonitor } from "../object-selector-monitor";
+import { icon } from "./types";
 
-const CLOSE_POPUP_ACTIONS = new Set(["assist", "more-info"]);
+const CLOSE_POPUP_ACTIONS = new Set(["assist"]);
 
 class BrowserModPopup extends LitElement {
   @property() open;
@@ -18,11 +23,17 @@ class BrowserModPopup extends LitElement {
   @property({ reflect: true }) actions;
   @property({ reflect: true }) card;
   @property() right_button;
+  @property() right_button_close;
   @property() left_button;
+  @property() left_button_close;
   @property() dismissable;
+  @property({ type: Array}) icons: icon[];
+  @property({ reflect: true }) timeout_hide_progress;
   @property({ reflect: true }) wide;
   @property({ reflect: true }) fullscreen;
+  @property({ reflect: true }) classic;
   @property() _style;
+  @property() _formDataValid;
   @query("ha-dialog") dialog: any;
   _autoclose;
   _autocloseListener;
@@ -33,9 +44,20 @@ class BrowserModPopup extends LitElement {
   _resolveClosed;
   _formdata;
   card_mod;
+  _allowNestedMoreInfo;
+  _objectSelectorMonitor: ObjectSelectorMonitor;
+ 
+  connectedCallback() {
+    super.connectedCallback();
+    this._objectSelectorMonitor = new ObjectSelectorMonitor(
+      this,
+      (value: boolean) => { this._formDataValid = value }
+    );
+  }
 
   async closeDialog() {
     this.open = false;
+    this._objectSelectorMonitor.stopMonitoring();
     this.card?.remove?.();
     this.card = undefined;
     clearInterval(this._timeoutTimer);
@@ -50,6 +72,16 @@ class BrowserModPopup extends LitElement {
     if ((this as any)._cardMod?.[0]) {
       (this as any)._cardMod[0].styles = "";
     }
+    this.dispatchEvent(
+      new CustomEvent("browser-mod-style-hass-more-info-dialog", {
+        bubbles: false,
+        composed: false,
+        cancelable: false,
+        detail: {
+          apply: false,
+        },
+      })
+    );
   }
 
   openDialog() {
@@ -60,7 +92,9 @@ class BrowserModPopup extends LitElement {
       this._timeoutTimer = setInterval(() => {
         const ellapsed = new Date().getTime() - this._timeoutStart;
         const progress = (ellapsed / this.timeout) * 100;
-        this.style.setProperty("--progress", `${progress}%`);
+        if (!this.timeout_hide_progress) {
+          this.style.setProperty("--progress", `${progress}%`);
+        }
         if (ellapsed >= this.timeout) {
           clearInterval(this._timeoutTimer);
           this._timeout();
@@ -81,7 +115,12 @@ class BrowserModPopup extends LitElement {
       (customElements.get("card-mod") as any)?.applyToElement?.(
         this,
         "more-info",
-        this.card_mod?.style ?? ""
+        this.card_mod?.style ? 
+          { style: this.card_mod.style, debug: this.card_mod?.debug ?? false } : 
+          { style: "{}", debug: this.card_mod?.debug ?? false } ,
+        {},
+        true,
+        "browser_mod-card_mod"
       );
     });
 
@@ -98,6 +137,9 @@ class BrowserModPopup extends LitElement {
           }`;
           el.appendChild(styleEl);
         });
+      }
+      if (this._formdata) {
+        setTimeout(() => this._objectSelectorMonitor.startMonitoring(), 0);
       }
     });
   }
@@ -124,19 +166,30 @@ class BrowserModPopup extends LitElement {
     {
       right_button = undefined,
       right_button_action = undefined,
+	    right_button_close = true,
       left_button = undefined,
       left_button_action = undefined,
+	    left_button_close = true,
       dismissable = true,
       dismiss_action = undefined,
       timeout = undefined,
       timeout_action = undefined,
+      timeout_hide_progress = undefined,
       size = undefined,
       style = undefined,
       autoclose = false,
       card_mod = undefined,
+      allow_nested_more_info = true,
+      icon = undefined,
+      icon_title = undefined,
+      icon_action = undefined,
+      icon_close = true,
+      icon_class = undefined,
+      icons = undefined,
     } = {}
   ) {
     this._formdata = undefined;
+    this._formDataValid = true;
     this.title = title;
     this.card = undefined;
     this.card_mod = card_mod;
@@ -177,11 +230,14 @@ class BrowserModPopup extends LitElement {
     }
 
     this.right_button = right_button;
+	  this.right_button_close = right_button_close;
     this.left_button = left_button;
+	  this.left_button_close = left_button_close;
     this.actions = right_button === undefined ? undefined : "";
 
     this.dismissable = dismissable;
     this.timeout = timeout;
+    this.timeout_hide_progress = timeout_hide_progress;
     this._actions = {
       right_button_action,
       left_button_action,
@@ -190,8 +246,35 @@ class BrowserModPopup extends LitElement {
     };
     this.wide = size === "wide" ? "" : undefined;
     this.fullscreen = size === "fullscreen" ? "" : undefined;
+    this.classic = size === "classic" ? "" : undefined;
     this._style = style;
     this._autoclose = autoclose;
+    this._allowNestedMoreInfo = allow_nested_more_info;
+    if (icons) {
+      this.icons = [];
+      const iconDefaults = { 
+        icon: undefined,
+        title: undefined,
+        action: undefined,
+        close: true,
+        class: undefined
+      }
+      icons.forEach((icon, index) => {
+        this.icons[index] = { ...iconDefaults, ...icon }
+      });
+    } else if (icon) {
+      this.icons = [
+        { 
+          icon: icon, 
+          title: icon_title, 
+          action: icon_action,
+          close: icon_close,
+          class: icon_class,
+        }
+      ];
+    } else {
+      this.icons = [];
+    }
   }
 
   async do_close() {
@@ -199,22 +282,28 @@ class BrowserModPopup extends LitElement {
     if (this._actions?.dismiss_action) this._actions.dismiss_action = undefined;
     await this.dialog?.close();
     action?.(this._formdata);
+    this._objectSelectorMonitor.stopMonitoring()
   }
 
   async _primary() {
     if (this._actions?.dismiss_action) this._actions.dismiss_action = undefined;
-    await this.do_close();
+	  if (this.right_button_close === true) await this.do_close();
     this._actions?.right_button_action?.(this._formdata);
   }
   async _secondary() {
     if (this._actions?.dismiss_action) this._actions.dismiss_action = undefined;
-    await this.do_close();
+    if (this.left_button_close === true) await this.do_close();
     this._actions?.left_button_action?.(this._formdata);
   }
   async _timeout() {
     if (this._actions?.dismiss_action) this._actions.dismiss_action = undefined;
     await this.do_close();
     this._actions?.timeout_action?.();
+  }
+  async _icon_action(index) {
+    if (this._actions?.dismiss_action) this._actions.dismiss_action = undefined;
+    if (this.icons?.[index]?.close) await this.do_close();
+    await this.icons?.[index]?.action?.();
   }
 
   render() {
@@ -230,7 +319,7 @@ class BrowserModPopup extends LitElement {
         .scrimClickAction=${this.dismissable ? "close" : ""}
         .escapeKeyAction=${this.dismissable ? "close" : ""}
       >
-        ${this.timeout
+        ${this.timeout && !this.timeout_hide_progress
           ? html` <div slot="heading" class="progress"></div> `
           : ""}
         ${this.title
@@ -247,6 +336,22 @@ class BrowserModPopup extends LitElement {
                     `
                   : ""}
                 <span slot="title" .title="${this.title}">${this.title}</span>
+                ${this.icons 
+                  ?
+                    repeat(
+                      this.icons,
+                      (icon, index) => html`
+                        <ha-icon-button
+                          slot="actionItems"
+                          title=${icon.title ?? ""}
+                          @click=${() => { this.blur(); this._icon_action(index)} }
+                          class=${icon.class ?? ""}
+                        >
+                          <ha-icon .icon=${icon.icon}></ha-icon>
+                        </ha-icon-button>
+                      `
+                    )
+                  : "" }
               </ha-dialog-header>
             `
           : html``}
@@ -271,6 +376,7 @@ class BrowserModPopup extends LitElement {
                           .label=${this.right_button}
                           @click=${this._primary}
                           class="action-button"
+                          ?disabled=${!this._formDataValid}
                         ></mwc-button>
                       `
                     : ""}
@@ -318,9 +424,16 @@ class BrowserModPopup extends LitElement {
         --padding-x: var(--popup-padding-x, 24px);
         --padding-y: var(--popup-padding-y, 20px);
       }
-
+      .content {
+        -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+        -webkit-focus-ring-color: rgba(0, 0, 0, 0);
+        outline: none !important;
+      }
       .content .container {
         padding: 8px 24px 20px 24px;
+        -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+        -webkit-focus-ring-color: rgba(0, 0, 0, 0);
+        outline: none !important;
       }
       :host([card]) .content .container {
         padding: 8px 8px 20px 8px;
@@ -366,6 +479,14 @@ class BrowserModPopup extends LitElement {
       }
       :host([wide]) .content {
         width: calc(90vw - 2 * var(--padding-x));
+      }
+
+      :host([classic]) ha-dialog {
+        --dialog-surface-margin-top: 40px;
+        --mdc-dialog-min-height: 10%;
+        --mdc-dialog-max-height: 100%;
+        --vertical-align-dialog: flex-start;
+        --ha-dialog-border-radius: var(--popup-border-radius, 28px);
       }
 
       :host([fullscreen]) ha-dialog {
@@ -426,24 +547,73 @@ export const PopupMixin = (SuperClass) => {
       this._popupEl.addEventListener("hass-more-info", async (ev) => {
         ev.stopPropagation();
         const base = await hass_base_el();
-        this._popupEl.do_close();
-        // this._popupEl.style.display = "none";
+        if (this._popupEl?._allowNestedMoreInfo) {
+          if (ev.detail?.ignore_popup_card === undefined) {
+            ev.detail.ignore_popup_card = true;
+          }
+        } else {
+          this._popupEl.do_close();
+        }
         base.dispatchEvent(ev);
+        this._popupEl.dispatchEvent(
+          new CustomEvent("browser-mod-style-hass-more-info-dialog", {
+            bubbles: false,
+            composed: false,
+            cancelable: false,
+            detail: {
+              apply: true,
+            },
+          })
+        );
+      });
+
+      this._popupEl.addEventListener("browser-mod-style-hass-more-info-dialog", async (ev: CustomEvent) => {
+        if (!this._popupEl?._allowNestedMoreInfo) return;
+        const hassMoreInfoDialog = await getMoreInfoDialog(true);
+        if (hassMoreInfoDialog) {
+          let styleEl = hassMoreInfoDialog.shadowRoot.querySelector("#browser-mod-style");
+          if (!styleEl) {
+            styleEl = document.createElement("style");
+            styleEl.id = "browser-mod-style";
+            styleEl.innerHTML = `
+            :host([browser-mod-nested]) ha-dialog {
+              position: fixed !important;
+              z-index: 999 !important;
+            }`;
+            hassMoreInfoDialog.shadowRoot.appendChild(styleEl);
+          }
+          if (ev.detail?.apply) {
+            hassMoreInfoDialog.setAttribute("browser-mod-nested", "");
+          } else {
+            hassMoreInfoDialog.removeAttribute("browser-mod-nested");
+          }
+        }
       });
 
       this._popupEl.addEventListener("hass-action", async (ev: CustomEvent) => {
-        if (
-          (ev.detail.action === "tap" &&
-            CLOSE_POPUP_ACTIONS.has(ev.detail.config?.tap_action?.action)) ||
-          (ev.detail.action === "hold" &&
-            CLOSE_POPUP_ACTIONS.has(ev.detail.config?.hold_action?.action)) ||
-          (ev.detail.action === "double_tap" &&
-            CLOSE_POPUP_ACTIONS.has(
-              ev.detail.config?.double_tap_action?.action
-            ))
-        ) {
-          this._popupEl.do_close();
+        const actionType = ev.detail.action;
+        if (actionType) {
+          const actionConfig = ev.detail?.config?.[`${actionType}_action`];        
+          if (actionConfig) {
+            if (actionConfig.action === "more-info") {
+              ev.stopPropagation();
+              this.showMoreInfo(
+                actionConfig.entity ? actionConfig.entity : ev.detail.config.entity,
+                actionConfig.large ?? false,
+                actionConfig.ignore_popup_card ?? false,
+              );
+              return;
+            } else if (CLOSE_POPUP_ACTIONS.has(actionConfig.action)){
+              this._popupEl.do_close();
+            }
+          }
         }
+        ev.stopPropagation();
+        const base = await hass_base_el();
+        base.dispatchEvent(ev);
+      });
+
+      this._popupEl.addEventListener("show-dialog", async (ev) => {
         ev.stopPropagation();
         const base = await hass_base_el();
         base.dispatchEvent(ev);
@@ -454,11 +624,29 @@ export const PopupMixin = (SuperClass) => {
         if (popupState) {
           if (!popupState.open) {
             if (this._popupEl?.open && this._popupEl?.dismissable)
-              this._popupEl.do_close();
+              await this._popupEl.do_close();
           }
         }
       };
       window.addEventListener("popstate", historyListener);
+      const locationListener = async (ev) => {
+        if (this._popupEl?.open)
+            await this._popupEl.do_close();
+      };
+      window.addEventListener("location-changed", locationListener);
+
+      this._contextProviderValues = [];
+      // Pass on the context request to hass base element as we are outside its DOM tree
+      // Not using @lit/context as it does not work on older devices
+      // Rather we patch through to hass base, first providing the last known context value
+      // to manage any issues with cards and contexts. e.g. history card.
+      this._popupEl.addEventListener("context-request", async (ev) => {
+        const value = (ev.context in this._contextProviderValues) ? this._contextProviderValues[ev.context] : {};
+        ev.callback(value, (value: any, unsubscribe: any) => { void(0); });
+        const base = await hass_base_el() as any;
+        base.__contextProviders[ev.context].onContextRequest(ev);
+        this._contextProviderValues[ev.context] =base.__contextProviders[ev.context].value;
+      });
     }
 
     showPopup(...args) {
@@ -487,9 +675,15 @@ export const PopupMixin = (SuperClass) => {
       })();
     }
 
-    closePopup(...args) {
+    async closePopup(...args) {
       this._popupEl.closeDialog();
-      this.showMoreInfo("");
+      // Prefer closing ha-dialog directly as this is better for issues when webRTC is used on dialog
+      const haDialog = await getMoreInfoDialogHADialog();
+      if (haDialog) {
+        haDialog.close();
+      } else {
+        this.showMoreInfo("");
+      }
     }
 
     async showMoreInfo(entityId, large = false, ignore_popup_card = undefined) {
@@ -508,6 +702,18 @@ export const PopupMixin = (SuperClass) => {
           "ha-more-info-dialog"
         );
         if (dialog) dialog.large = true;
+      }
+      if (this._popupEl?.open) {
+        this._popupEl.dispatchEvent(
+          new CustomEvent("browser-mod-style-hass-more-info-dialog", {
+            bubbles: false,
+            composed: false,
+            cancelable: false,
+            detail: {
+              apply: true,
+            },
+          })
+        );
       }
     }
   };

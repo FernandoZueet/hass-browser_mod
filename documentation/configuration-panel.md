@@ -12,8 +12,8 @@ LocalStorage works basically like cookies in that the information is stored loca
 
 Registering a _Browser_ as a device will create a Home Assistant Device associated with that browser. The device has the following entities:
 
-- A `media_player` entitiy which will play sound and video through the browser.
-- A `light` entity will turn the screen on or off and controll the brightness if you are using [Fully Kiosk Browser](https://www.fully-kiosk.com/) (FKB). If you are not using FKB the function will be simulated by covering the screen with a black (or semitransparent) box.
+- A `media_player` entitiy which will play sound and video through the browser. This entity has attributes `video_interaction_required` and `audio_interaction_required` which will be set to `true` if user interaction is required on the browser before being able to play video or audio. Generally user interaction is not required to play muted video. The `media_player` will be muted while ever user interaction is required for audio.
+- A `light` entity will turn the screen on or off and controll the brightness if you are using [Fully Kiosk Browser](https://www.fully-kiosk.com/) (FKB). If you are not using FKB the function will be simulated by covering the screen with a black (or semitransparent) box. There is a [Frontend Setting](#frontend-settings-admin-only) to optionally save the browser screen state for a browser.
 - A motion `binary_sensor` which reacts to mouse and/or keyboard activity in the Browser. In FKB this can also react to motion in front of the devices camera.
 - A number of `sensor` and `binary_sensor` entities providing different bits of information about the Browser which you may or may not find useful.
 
@@ -49,6 +49,8 @@ For each option the first applicable value will be applied.
 
 In the screenshot below, for example, the sidebar title would be set to "My home" - the GLOBAL setting - for any user on any browser (even unregistered). For any user logged in on the "kitchen-dashboard" browser, the sidebar title would instead be set to "FOOD", except for the user "dev" for whom the sidebar title would always be "DEV MODE".
 ![Example of a frontend setting being applied for a user, a browser and globally](https://user-images.githubusercontent.com/1299821/187984798-04e72fff-7cce-4394-ba69-42e62c5e0acb.png)
+
+As settings here may mean you get yourself locked out of Browser Mod panel in some way, there is a Frontend Settings __Kill Switch__ available. Append `?disableBrowserModFrontEndSettings` to the Home Assistant URL. e.g. `http://localhost:8123/lovelace/0?disableBrowserModFrontendSettings`
 
 ### Title template
 
@@ -93,9 +95,51 @@ This will hide the header bar. Completely. It does not care if there are useful 
 
 Set the default dashboard that is shown when you access `https://<your home assistant url>/` with nothing after the `/`.
 
-> *Note:* This also of works with other pages than lovelace dashboards, like e.g. `logbook` or even `history?device_id=f112fd806f2520c76318406f98cd244e&start_date=2022-09-02T16%3A00%3A00.000Z&end_date=2022-09-02T19%3A00%3A00.000Z`.
+> *Note:* 
+>1. This option sets the same local setting as Home Assistants' Dashboard setting in User Settings. If this setting does not provide exactly what you are after you may wish to use a Default action with `browser_mod.navigate`.
+>2. This also of works with other pages than lovelace dashboards, like e.g. `logbook` or even `history?device_id=f112fd806f2520c76318406f98cd244e&start_date=2022-09-02T16%3A00%3A00.000Z&end_date=2022-09-02T19%3A00%3A00.000Z`.
+
+### Default action
+
+Set the default action to be run when Browser is loaded or refreshed. This setting accepts the same action Config as per `browser_mod.popup` actions. For more information see the examples actions included in [Actionable popups](./popups.md#actionable-popups). If you are using Browser Mod [SERVICES](./services.md), in most cases you would omit `browser_id` or `user_id` so the service runs on the loading Browser.
+
+__IMPORTANT__: Like actions popups and notifications, this setting DOES NOT support templates. 
+
+*Tips:*
+1. Multiple actions can be called by using a list of actions. These are called in parallel, matching actions for popups and notifications.
+```yaml
+- action: browser_mod.navigate
+  data:
+    path: /my-dashboard/second-view
+- action: browser_mod.notification
+  data:
+    message: Good Morning Dave
+```
+2. For fine grained control of timing, consider using `browser_mod.sequence`. Note here that only one top level action is used.
+```yaml
+action: browser_mod.sequence
+data:
+  sequence:
+    - service: browser_mod.navigate
+      data:
+        path: /my-dashboard/second-view
+    - service: browser_mod.delay
+      data:
+        time: 5000
+    - service: browser_mod.notification
+      data:
+        message: Good Morning Dave
+```
 
 ### Sidebar order
+
+#### Home Assistant 2025.6 and onwards
+
+Home Assistant 2025.6 introduced a sidebar settings dialog to replace the in place edit mode. Browser Mod uses this dialog for editing sdeibar order and visibility.
+
+__IMPORTANT__: Home Assistant will store sidebar settings in the Home Assistant user profile. This will prevent Browser and Global sidebar settings from being applied. If a user has sidebar settings synced to their user profile, a warning will be display with an option to clear the synced settings to allow Browser Mod to take precedence.
+
+#### Home Assistant prior to 2025.6
 
 Set the order and hidden items of the sidebar. To change this setting:
 
@@ -110,7 +154,10 @@ Set the order and hidden items of the sidebar. To change this setting:
 This changes the "Home Assistant" text that is displayed at the top of the sidebar.
 Accepts Jinja [templates](https://www.home-assistant.io/docs/configuration/templating/).
 
-
 ### Hide interaction icon
 
-This hides the icon in the bottom right corner which indicates that you need to interact with the browser window before Browser Mod will function completely.
+This hides the icon in the bottom right corner which indicates that you need to interact with the browser window before Browser Mod will function completely. This does not remove the need for interaction. You can always check the need for interaction through the `video_interaction_required` and `audio_interaction_required` attributes of the `media_player` entity.
+
+### Save screen state
+
+This saves the screen state on browser disconnect and restores on browser reconnect. The screen state (on/off) and brightness are both saved. The state will be saved and restored for all browsers that have this setting applied, including those running Fully Kiosk.

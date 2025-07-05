@@ -6,9 +6,11 @@ Service parameters are described using the following conventions:
 
   - `<string>` is a piece of text
   - `<number>` is a number
+  - `list` is a yaml list
   - `<TRUE/false>` means the value must be either `true` or `false` with `true` being the default
   - `<service call>` means a full service call specification. Note that this can be any service, not just Browser Mod services
-  - `<Browser IDs>` is a list of BrowserIDs
+  - `<Browser IDs>` is a list of Browser IDs
+  - `<Users>` is a list of Home Assistant Users by Person Entity of User ID (being the user_id attribute of a person). The UI will use select from Persons.
 
 - Square brackets `[ ]` indicate that a parameter is optional and can be omitted.
 
@@ -33,13 +35,13 @@ The first way is as a *server* call. This is when the service is called from a s
 
 The second way is as a *browser* call. This is when the service is called from a dashboard `fire-dom-event` action, as a part of a `browser_mod.sequence` call or as a `browser_mod.popup` `_action`.
 
-The notable difference between the two is when no target (`browser_id`) is specified, in which case:
+The notable difference between the two is when no target (`browser_id` or `user_id`) is specified, in which case:
 - A *server* call will perform the service on ALL REGISTERED BROWSERS.
 - A *browser* call will perform the service on THE CURRENT BROWSER, i.e. the browser it was called from.
 
 ---
 
-Finally, in *browser* calls, a parameter `browser_id` with the value `THIS` will be replaced with the current Browsers browser ID.
+Finally, in *browser* calls there is `browser_id` and `user_id` replacements of `THIS` available. A parameter `browser_id` with the value `THIS` will be replaced with the current Browsers browser ID. A parameter `user_id` with the value of `THIS` will be replaced by the logged in user ID.
 
 Ex:
 
@@ -67,10 +69,9 @@ Will print `"Button was clicked in 79be65e8-f06c78f" to the Home Assistant log.
 
 # Calling services
 
-Services can be called from the backend using the normal service call procedures. Registered Browsers can be selected as targets through their device:
-![A picture exemplifying setting up a browser_mod.more_info service call in the GUI editor](https://user-images.githubusercontent.com/1299821/180668350-1cbe751d-615d-4102-b939-e49e9cd2ca74.png)
+Services can be called from the backend using the normal service call procedures. Registered Browsers can be selected as targets through via Browser ID or User ID. User ID can be a person entity or the user_id of the user.
 
-In yaml, the BrowserID can be used for targeting a specific browser:
+In yaml, the Browser ID or User ID can be used for targeting a specific browser:
 
 ```yaml
 service: browser_mod.more_info
@@ -78,9 +79,12 @@ data:
   entity: light.bed_light
   browser_id:
     - 79be65e8-f06c78f
+  user_id:
+    - person.bob
+    - 304450996c654be69b79d7304951b9b7
 ```
 
-If no target or `browser_id` is specified, the service will target all registerd Browsers.
+If no target, either `browser_id` or `user_id` is specified, the service will target all registerd Browsers.
 
 To call a service from a dashboard use the call-service [action](https://www.home-assistant.io/dashboards/actions/) or the special action `fire-dom-event`:
 
@@ -95,11 +99,13 @@ tap_action:
 
 Services called via `fire-dom-event` or called as a part of a different service call will (by default) _only_ target the current Browser (even if it's not registered).
 
+# Actions
 
+Wherever an action is used (`*_action:` in `browser_mod.popup` and `action:` in `browser_mod.notification`), both old style `service:` and new style `action:` can be used. Also actions can be a list allowing for several actions to be called. This can be useful if you only have server actions to run. Otherwise, if you have browser calls you are best to use `broswer_mod.sequence`.
 
 # Browser Mod Services
 
-> Note: Since `browser_id` is common for all services it is not explained further.
+> Note: Since `browser_id` and `user_id` are common for all services they are not explained further.
 
 ## `browser_mod.navigate`
 
@@ -110,6 +116,7 @@ service: browser_mod.navigate
 data:
   path: <string>
   [browser_id: <Browser IDs>]
+  [user_id: <User IDs>]
 ```
 
 | | |
@@ -124,6 +131,7 @@ Reload the current page.
 service: browser_mod.refresh
 data:
   [browser_id: <Browser IDs>]
+  [user_id: <User IDs>]
 ```
 
 ## `browser_mod.more_info`
@@ -137,6 +145,7 @@ data:
   [large: <true/FALSE>]
   [ignore_popup_card: <true/FALSE>]
   [browser_id: <Browser IDs>]
+  [user_id: <User IDs>]
 ```
 
 | | |
@@ -154,39 +163,93 @@ service: browser_mod.popup
 data:
   [title: <string>]
   content: <string / Dashboard card configuration / ha-form schema>
-  [size: <NORMAL/wide/fullscreen>]
+  [size: <NORMAL/classic/wide/fullscreen>]
+  [icon: <string>]
+  [icon_title: <string>]
+  [icon_action: <service call>]
+  [icon_close: <TRUE/false>]
+  [icon_class: <string>]
+  [icons: <list>]
+    [icon: <string>]
+    [title: <string>]
+    [action: <service-call>]
+    [close: <TRUE/false>]
+    [class: <string>]
   [right_button: <string>]
   [right_button_action: <service call>]
+  [right_button_close: <TRUE/false>]
   [left_button: <string>]
   [left_button_action: <service call>]
+  [left_button_close: <TRUE/false>]
   [dismissable: <TRUE/false>]
   [dismiss_action: <service call>]
   [autoclose: <true/FALSE>]
   [timeout: <number>]
   [timeout_action: <service call>]
+  [timeout_hide_progress: <true/FALSE>]
+  [allow_nested_more_info: <TRUE/false>]
   [style: <string>]
   [browser_id: <Browser IDs>]
+  [user_id: <User IDs]
 ```
 
 | | |
 |---|---|
 |`title` | The title of the popup window.|
 |`content`| HTML, a dashboard card configuration or ha-form schema to display.|
-| `size` | `wide` will make the popup window wider. `fullscreen` will make it cover the entire screen. |
+| `icon` | An mdi icon which will appear in the popup header. e.g. mdi:home. `title` must be set for the header to show. |
+| `icon_title` or `icons` > `title` | Tooltip for the icon. |
+| `icon_action` or `icons` > `action` | Action to perform when the icon is pressed. |
+| `icon_close` or `icons` > `close` | Enable/disable popup closing when the icon is pressed. |
+| `icon_class` or  `icons` > `class` | CSS Class to apply to the icon. This allows for styling the icon directly using `style`. |
+| `size` | `wide` will make the popup window wider. `fullscreen` will make it cover the entire screen. `classic` will keep popups non-fullheight on small devices |
 | `right_button`| The text of the right action button.|
 | `right_button_action`| Action to perform when the right action button is pressed. |
+| `right_button_close`| Enable/disable popup closing when the right action button is pressed. |
 | `left_button`| The text of the left action button.|
 | `left_button_action`| Action to perform when the left action button is pressed. |
+| `left_button_close`| Enable/disable popup closing when the left action button is pressed. |
 | `dismissable`| If false the dialog cannot be closed by the user without clicking an action button. |
 | `dismiss_action` | An action to perform if the dialog is closed by the user without clicking an action button. |
 | `autoclose` | If true the dialog will close automatically when the mouse, screen or keyboard is touched. This will perform the `dismiss_action`. |
 | `timeout` | If set will close the dialog after `timeout` milliseconds. |
 | `timeout_action` | An action to perform if the dialog is closed by timeout. |
+| `timeout_hide_progress` | If true the timeout progress bar will be hidden. |
+| `allow_nested_more_info` | If true nested Home Assistant more-info popups are allowed without closing the popup. |
 | `style` | CSS styles to apply to the dialog. |
 
-Note that any Browser Mod services performed as `_action`s here will be performed only on the same Browser as initiated the action unless `browser_id` is given.
+Note that any Browser Mod services performed as `_action`s here will be performed only on the same Browser as initiated the action unless `browser_id` or `user_id` is given.
 
 If a ha-form schema is used for `content` the resulting data will be inserted into the `data` for any `_action`.
+
+One icon can be specified for custom:popup-card UI editor which populates `icon:`, `icon_*` parameters. To specificy multiple icons use a yaml list under `icons:` in yaml. `icons:` list takes precedence. Below is an example using multiple icons and a style to match.
+
+```yaml
+...
+icons:
+  - icon: mdi:account
+    title: Account
+    action:
+      action: browser_mod.notification
+      data:
+        message: Account action
+    class: account-icon
+  - icon: mdi:home
+    title: Home
+    action:
+      action: browser_mod.notification
+      data:
+        message: Home action
+    class: home-icon
+...
+style: |-
+  .account-icon {
+    color: red;
+  }
+  .home-icon {
+    color: blue;
+  }
+```
 
 See [popups.md](popups.md) for more information and usage examples.
 
@@ -199,6 +262,7 @@ Close any currently open popup or more-info dialog.
 service: browser_mod.close_popup
 data:
   [browser_id: <Browser IDs>]
+  [user_id: <User IDs>]
 ```
 
 ## `browser_mod.notification`
@@ -212,6 +276,8 @@ data:
   [duration: <number>]
   [action_text: <string>]
   [action: <service call>]
+  [browser_id: <Browser IDs>]
+  [user_id: <User IDs>]
 ```
 
 |||
@@ -232,6 +298,8 @@ data:
   [dark: <AUTO/dark/light>]
   [primaryColor: <RGB color>]
   [accentColor: <RGB color>]
+  [browser_id: <Browser IDs>]
+  [user_id: <User IDs>]
 ```
 
 `<RGB color>` is either a list of three RGB values 0-255 (ex: `[0, 128, 128]`) or a six digit hex color value (ex: `"#800080"`).
@@ -255,13 +323,16 @@ data:
     - <service call>
     - ...
   [browser_id: <Browser IDs>]
+  [user_id: <User IDs>]
 ```
 
 | | |
 |---|---|
 |`sequence` | List of actions to perform. |
 
-Note that if `browser_id` is omitted in the service calls listed in `sequence` the services will be performed on the Browser that's targeted as a whole rather than all browsers.
+Note that if `browser_id` and `user_id` is omitted in the service calls listed in `sequence` the services will be performed on the Browser that's targeted as a whole rather than all browsers. 
+
+TIP: To target browsers matching the current loggded in user ID you can use `user_id: THIS`. This may be useful when you have a number of panels logged in as a viewing account and wish for the sequence to be performed on all the panels.
 
 ## `browser_mod.delay`
 
@@ -272,6 +343,7 @@ service: browser_mod.delay
 data:
   time: <number>
   [browser_id: <Browser IDs>]
+  [user_id: <User IDs>]
 ```
 
 | | |
@@ -289,6 +361,7 @@ service: browser_mod.console
 data:
   message: <string>
   [browser_id: <Browser IDs>]
+  [user_id: <User IDs>]
 ```
 
 | | |
@@ -304,6 +377,7 @@ service: browser_mod.javascript
 data:
   code: <string>
   [browser_id: <Browser IDs>]
+  [user_id: <User IDs>]
 ```
 
 | | |
@@ -319,3 +393,23 @@ Some helpful functions that are available:
 - `log(message)` - Print `message` to the Home Assistant log
 - `lovelace_reload()` - Reload lovelace configuration
 The `hass` frontend object is available as global variable `hass`.
+
+## `browser_mod.deregister_browser`
+
+```yaml
+services: browser_mod.deregister_browser
+data:
+  [browser_id: <Browser IDs>]
+  [browser_id_exclude: <Browser IDs>]
+  [area_id_exclude: <Area IDs>]
+```
+
+Degreisters browsers including those no longer reporting: removes entities, devices and cleans up the Browser Mod data store. If you deregister a browser that is currently active, it will be recreated if Auto Registration is currently active. However all specific browser settings will have been removed.
+
+When calling `browser_mod.deregister_browser`, one of `browser_id`, `browser_id_exclude` or `area_id_exclude` needs to be set. To tidy up a current installation, run `browser_mod.deregister_browser`with with one of the `_exclude` parameters. If you wish to use this regularly to clean up auto registered browsers, it is recommended to use areas to be able to exclude those areas. Alternative, turn off Auto Registration once your installation is stable.
+
+| | |
+|---|---|
+|`browser_id` | Single or list or browsers to deregister. If included these browsers will be deregistered. |
+|`browser_id_exclude` | Single or list or browsers to exclude from deregister. |
+|`area_id_exclude` | Single or list or areas to exclude from deregister. |

@@ -6,7 +6,7 @@ class BrowserModRegisteredBrowsersCard extends LitElement {
   @property() dirty = false;
 
   toggleRegister() {
-    if (!window.browser_mod?.connected) return;
+    if (!window.browser_mod?.ready) return;
     window.browser_mod.registered = !window.browser_mod.registered;
     this.dirty = true;
   }
@@ -30,7 +30,7 @@ class BrowserModRegisteredBrowsersCard extends LitElement {
       <ha-card outlined>
         <h1 class="card-header">
           <div class="name">This Browser</div>
-          ${window.browser_mod?.connected
+          ${window.browser_mod?.ready
             ? html`
                 <ha-icon
                   class="icon"
@@ -101,7 +101,8 @@ class BrowserModRegisteredBrowsersCard extends LitElement {
                 ${window.browser_mod?.cameraError
                   ? html`
                       <ha-alert alert-type="error">
-                        Setting up the device camera failed. Make sure you have
+                        Setting up the device camera failed. Make sure you are browsing
+                        in a secure (https://) context and have
                         allowed use of the camera in your browser.
                       </ha-alert>
                     `

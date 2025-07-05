@@ -1,13 +1,13 @@
 import { LitElement, html, css } from "lit";
 import { property, state } from "lit/decorators.js";
-import { PopupCardManager } from "./popupCardManager";
 
 import "./popup-card-editor";
+import { getLovelaceRoot, hass_base_el } from "../helpers";
 
 class PopupCard extends LitElement {
   @property() hass;
   @state() _config;
-  @property({ attribute: "edit-mode", reflect: true }) editMode;
+  @property({ type: Boolean, reflect: true}) preview = false;
   @state() _element;
 
   static getConfigElement() {
@@ -24,11 +24,6 @@ class PopupCard extends LitElement {
     };
   }
 
-  constructor() {
-    super();
-    this.popup = this.popup.bind(this);
-  }
-
   setConfig(config) {
     this._config = config;
     (async () => {
@@ -36,49 +31,6 @@ class PopupCard extends LitElement {
       this._element = await ch.createCardElement(config.card);
       this._element.hass = this.hass;
     })();
-  }
-
-  async connectedCallback() {
-    super.connectedCallback();
-    window.addEventListener("hass-more-info", this.popup);
-
-    if (this.parentElement.localName === "hui-card-preview") {
-      this.editMode = true;
-    }
-  }
-
-  async disconnectedCallback() {
-    super.disconnectedCallback();
-    window.removeEventListener("hass-more-info", this.popup);
-  }
-
-  popup(ev: CustomEvent) {
-    if (
-      ev.detail?.entityId === this._config.entity &&
-      !ev.detail?.ignore_popup_card
-    ) {
-      ev.stopPropagation();
-      ev.preventDefault();
-      const config = { ...this._config };
-      delete config.card;
-
-      window.browser_mod?.service("popup", {
-        content: this._config.card,
-        ...this._config,
-      });
-      setTimeout(
-        () =>
-          this.dispatchEvent(
-            new CustomEvent("hass-more-info", {
-              bubbles: true,
-              composed: true,
-              cancelable: false,
-              detail: { entityId: "" },
-            })
-          ),
-        10
-      );
-    }
   }
 
   updated(changedProperties) {
@@ -93,7 +45,8 @@ class PopupCard extends LitElement {
   }
 
   render() {
-    if (!this.editMode) return html``;
+    this.setHidden(!this.preview);
+    if (!this.preview) return html``;
     return html` <ha-card>
       <div class="app-toolbar">
         ${this._config.dismissable
@@ -139,15 +92,20 @@ class PopupCard extends LitElement {
     </ha-card>`;
   }
 
+  private setHidden(hidden: boolean): void {
+    if (this.hasAttribute('hidden') !== hidden) {
+      this.toggleAttribute('hidden', hidden);
+      this.dispatchEvent(
+        new Event('card-visibility-changed', {
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    }
+  }
+
   static get styles() {
     return css`
-      :host {
-        display: none !important;
-      }
-      :host([edit-mode="true"]) {
-        display: block !important;
-        border: 1px solid var(--primary-color);
-      }
       ha-card {
         background-color: var(
           --popup-background-color,
@@ -191,33 +149,57 @@ class PopupCard extends LitElement {
   }
 }
 
-function setupPopupEventListener(lovelaceRoot: HTMLElement | null) {
-  if (!lovelaceRoot) return;
-
-  const popupManager = new PopupCardManager(lovelaceRoot);
-
-  window.addEventListener("call-popup", (ev: CustomEvent) => {
-    const popupId = ev.detail?.id;
-    if (!popupId) return;
-
-    const cardConfig = popupManager.findPopupCardConfig(popupId);
-    if (cardConfig) {
-      ev.stopPropagation();
-      ev.preventDefault();
-      let properties = { ...cardConfig };
-      delete properties.card;
-      delete properties.entity;
-      delete properties.type;
-      window.browser_mod?.service("popup", {
-        content: cardConfig.card,
-        ...properties,
-      });
-
-    }
-  });
+function popupCardMatch(card, entity, viewIndex, curView) {
+  return card.type === 'custom:popup-card' &&
+         card.entity === entity &&
+         (viewIndex === curView || card.popup_card_all_views);
 }
 
-(async () => {
+function findPopupCardConfig(lovelaceRoot, entity) {
+  const lovelaceConfig = lovelaceRoot?.lovelace?.config;
+  if (lovelaceConfig) {
+    const curView = lovelaceRoot?._curView ?? 0;
+    // Place current view at the front of the view index lookup array.
+    // This allows the current view to be checked first for local cards, 
+    // and then the rest of the views for global cards, keeping current view precedence.
+    let viewLookup = Array.from(Array(lovelaceConfig.views.length).keys())
+    viewLookup.splice(curView, 1);
+    viewLookup.unshift(curView);
+    for (const viewIndex of viewLookup) {
+      const view = lovelaceConfig.views[viewIndex];
+      if (view.cards) {
+        for (const card of view.cards) {
+          if (popupCardMatch(card, entity, viewIndex, curView)) return card;
+          // Allow for card one level deep. This allows for a sub card in a panel dashboard for example.
+          if (card.cards) {
+            for (const subCard of card.cards) {
+              if (popupCardMatch(subCard, entity, viewIndex, curView)) return subCard;
+            }
+          }
+        }
+      }
+      if (view.sections) {
+        for (const section of view.sections) {
+          if (section.cards) {
+            for (const card of section.cards) {
+              if (popupCardMatch(card, entity, viewIndex, curView)) return card;
+              // Allow for card one level deep. This allows for a sub card in a panel dashboard for example.
+              if (card.cards) {
+                for (const subCard of card.cards) {
+                  if (popupCardMatch(subCard, entity, viewIndex, curView)) return subCard;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+window.addEventListener("browser-mod-bootstrap", async (ev: CustomEvent) =>  {
+  ev.stopPropagation();
   while (!window.browser_mod) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
@@ -226,7 +208,64 @@ function setupPopupEventListener(lovelaceRoot: HTMLElement | null) {
   if (!customElements.get("popup-card"))
     customElements.define("popup-card", PopupCard);
 
-  const lovelaceRoot = await PopupCardManager.getLovelaceRoot();
-  if (lovelaceRoot) setupPopupEventListener(lovelaceRoot);
+  let rootMutationObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.type === "childList") {
+        for (const node of mutation.removedNodes) {
+          if (node instanceof Element && node.localName === "hui-root") {
+            lovelaceRoot = null;
+          }
+        }        
+        for (const node of mutation.addedNodes) {
+          if (node instanceof Element && node.localName === "hui-root") {
+            lovelaceRoot = node;
+          }
+        }  
+      }
+    }
+  });
+  let lovelaceRoot = await getLovelaceRoot(document);
+  if (rootMutationObserver && lovelaceRoot?.parentNode) {
+    rootMutationObserver.observe(lovelaceRoot.parentNode, {
+      childList: true,
+    });
+  }
 
-})();
+  // popstate will get fired on window.browser_mod?.service("popup", ...) but as this popstate
+  // is not currently cleared there is no way to distinguish this event properly at this time.
+  // Hence, setting lovelaceRoot on all popstate which captures, for examople, UI back from History Panel.
+  ['popstate','location-changed'].forEach(event => 
+    window.addEventListener(event, async (ev) => {
+      lovelaceRoot = await getLovelaceRoot(document);
+    })
+  );
+
+  window.addEventListener("hass-more-info", (ev: CustomEvent) => {
+    if (ev.detail?.ignore_popup_card || !ev.detail?.entityId || !lovelaceRoot) return;
+    const cardConfig = findPopupCardConfig(lovelaceRoot, ev.detail?.entityId);
+    if (cardConfig) {
+      ev.stopPropagation();
+      ev.preventDefault();
+      let properties = { ...cardConfig }
+      delete properties.card;
+      delete properties.entity;
+      delete properties.type;
+      window.browser_mod?.service("popup", {
+        content: cardConfig.card,
+        ...properties,
+      });
+      setTimeout(
+        () =>
+          lovelaceRoot.dispatchEvent(
+            new CustomEvent("hass-more-info", {
+              bubbles: true,
+              composed: true,
+              cancelable: false,
+              detail: { entityId: "" },
+            })
+          ),
+        10
+      );
+    }
+  });
+});
